@@ -81,7 +81,7 @@ structure guidelines** that offer several benefits:
    Restructure the `real_estate` module according to the guidelines.
 
    .. tip::
-      Pick `[CLN]` for your :ref:`commit message tag
+      Use `[CLN]` for your :ref:`commit message tag
       <contributing/git_guidelines/commit_tag_module>`.
 
 .. spoiler:: Solution
@@ -172,36 +172,260 @@ structure guidelines** that offer several benefits:
 Many-to-one
 ===========
 
-Many2One relationships are the building blocks of data hierarchy in Odoo. They allow you to link a record in one model to a single record in another model. Let's start by adding a Many2One field to our real.estate.property model to connect each property to a property type.
+As promised at the end of :doc:`the previous chapter <03_build_user_interface>`, we'll now expand
+our app's capabilities by adding new models to manage additional information. This expansion
+naturally leads us to an important question: How will our `real.estate.property` model connect to
+these new models?
 
-By convention, many2one fields have the _id suffix.
-
-.. note::
-   In Odoo, one2one implemented as many2many
-
-ondelete='restrict' or ondelete='cascade'
-
+In relational databases, including Odoo's, **many-to-one** relationships play a crucial role. These
+relationships allow you to link *multiple* records in one model to a *single* record in another
+model. In Odoo, many-to-one relationships are established by adding a `Many2one` field to the model
+representing the *many* side of the relationship. In practice, the field is represented by a
+`foreign key <https://en.wikipedia.org/wiki/Foreign_key>`_ that references the ID of the connected
+record. By convention, `Many2one` field names end with the `_id` suffix, indicating that they store
+the referenced record's ID.
 
 .. seealso::
    :ref:`Reference documentation for Many2one fields <reference/fields/many2one>`
 
-The type field is not flexible as it prevents adding new property types. Let's replace the field
-with a new model to manage property types.
+.. example::
+   In the example below, the `Selection` field of the `product` model is replaced by a `Many2one`
+   field to create a more flexible and scalable model structure.
+
+   .. code-block:: py
+
+      from odoo import fields, models
+
+
+      class Product(models.Model):
+          _name = 'product'
+          _description = "Storable Product"
+
+          [...]
+          category_id = fields.Many2one(
+              string="Category", comodel_name='product.category', ondelete='restrict', required=True
+          )
+
+      class ProductCategory(models.Model):
+          _name = 'product'
+          _category = "Product Category"
+
+          name = fields.Char(string="Name")
+
+   .. note::
+
+      - The relationship only needs to be declared on the *many* side to be established.
+      - The `ondelete` argument on the `Many2one` field defines what happens when the referenced
+        record is deleted.
+
+In our real estate app, we currently have a fixed set of property types. To increase flexibility,
+let's replace the current `type` field with a many-to-one relationship to a separate model for
+managing property types.
 
 .. exercise::
 
-   #. add property type model with necessary access rights
-   #. add menu item (replace Settings with Configuration > Property Types), action, and list-only view
-   #. add M2O field on the `real.estate.property` model to the `real.estate.property.type` model
-   #. add the field to the form, list and search views of properties
+   #. Create a new `real.estate.property.type` model.
+
+      - Update the :file:`ir.model.access.csv` file to grant all database administrators access to
+        the model.
+      - Replace the dummy :guilabel:`Settings` menu item with a new :menuselection:`Configuration
+        --> Property Types` menu item.
+      - Create a window action to browse property types only in list view.
+      - Create the list view for property types.
+      - In a data file, describe at least as many default property types as the `type` field of the
+        `real.estate.property` model supports.
+
+   #. Replace the `type` field on the `real.estate.property` model by a many-to-one relationship to
+      the `real.estate.property.type` model. Prevent deleting property types if a property
+      references them.
+
+   .. tip::
+
+      - As the window action doesn't allow opening property types in form view, clicking the
+        :guilabel:`New` button does nothing. To allow editing records in-place, rely on the
+        reference documentation for :ref:`root attributes of list views
+        <reference/view_architectures/list/root>`
+      - The server will throw an error at start-up because it can't require a value for the new,
+        currently empty field. To avoid fixing that manually in the database, run the command
+        :command:`dropdb tutorials` to delete the database and start from scratch.
 
 .. spoiler:: Solution
 
    .. code-block:: python
-      :caption: `__manifest__.py`
-      :emphasize-lines: 1
+      :caption: `real_estate_property_type.py`
 
-      todo
+      from odoo import fields, models
+      from odoo.tools import date_utils
+
+
+      class RealEstatePropertyType(models.Model):
+          _name = 'real.estate.property.type'
+          _description = "Real Estate Property Type"
+
+          name = fields.Char(string="Name", required=True)
+
+   .. code-block:: py
+      :caption: `__init__.py`
+      :emphasize-lines: 2
+
+      from . import real_estate_property
+      from . import real_estate_property_type
+
+   .. code-block:: csv
+      :caption: `ir.model.access.csv`
+      :emphasize-lines: 3
+
+      id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+      real_estate_property_system,real.estate.property.system,model_real_estate_property,base.group_system,1,1,1,1
+      real_estate_property_type_system,real.estate.property.type.system,model_real_estate_property_type,base.group_system,1,1,1,1
+
+   .. code-block:: xml
+      :caption: `menus.xml`
+      :emphasize-lines: 3-9
+
+      <menuitem id="real_estate.root_menu"> <!-- truncated -->
+          <menuitem id="real_estate.properties_menu"/> <!-- truncated -->
+          <menuitem id="real_estate.configuration_menu" name="Configuration" sequence="20">
+              <menuitem
+                  id="real_estate.property_types_menu"
+                  name="Property Types"
+                  action="real_estate.views_property_types_action"
+              />
+          </menuitem>
+      </menuitem>
+
+   .. code-block:: xml
+      :caption: `actions.xml`
+
+      <record id="real_estate.views_property_types_action" model="ir.actions.act_window">
+          <field name="name">Property Types</field>
+          <field name="res_model">real.estate.property.type</field>
+          <field name="view_mode">tree</field>
+      </record>
+
+   .. code-block:: xml
+      :caption: `real_estate_property_type_views.xml`
+
+      <?xml version="1.0" encoding="utf-8"?>
+      <odoo>
+
+          <record id="real_estate.property_type_list" model="ir.ui.view">
+              <field name="name">Property Type List</field>
+              <field name="model">real.estate.property.type</field>
+              <field name="arch" type="xml">
+                  <tree editable="bottom">
+                      <field name="name"/>
+                  </tree>
+              </field>
+          </record>
+
+      </odoo>
+
+   .. code-block:: xml
+      :caption: `real_estate_property_type_views.xml`
+
+      <?xml version="1.0" encoding="utf-8"?>
+      <odoo>
+
+          <record id="real_estate.type_house" model="real.estate.property.type">
+              <field name="name">House</field>
+          </record>
+
+          <record id="real_estate.type_apartment" model="real.estate.property.type">
+              <field name="name">Apartment</field>
+          </record>
+
+          <record id="real_estate.type_office" model="real.estate.property.type">
+              <field name="name">Office Building</field>
+          </record>
+
+          <record id="real_estate.type_retail" model="real.estate.property.type">
+              <field name="name">Retail Space</field>
+          </record>
+
+          <record id="real_estate.type_warehouse" model="real.estate.property.type">
+              <field name="name">Warehouse</field>
+          </record>
+
+      </odoo>
+
+   .. code-block:: py
+      :caption: `__manifest__.py`
+      :emphasize-lines: 3,4,8
+
+      'data': [
+          # Model data
+          'data/real_estate_property_type_data.xml',
+          'data/real_estate_property_data.xml',  # Depends on `real_estate_property_type_data.xml`
+          [...]
+          # Views
+          [...]
+          'views/real_estate_property_type_views.xml',
+      ],
+
+   .. code-block:: py
+      :caption: `real_estate_property.py`
+
+      type_id = fields.Many2one(
+          string="Type", comodel_name='real.estate.property.type', ondelete='restrict', required=True
+      )
+
+   .. code-block:: xml
+      :caption: `real_estate_property_views.xml`
+      :emphasize-lines: 5,14,27
+
+      <record id="real_estate.property_list" model="ir.ui.view">
+          [...]
+              <tree>
+                  [...]
+                  <field name="type_id"/>
+                  [...]
+              </tree>
+          </field>
+      </record>
+
+      <record id="real_estate.property_form" model="ir.ui.view">
+          [...]
+                          <group string="Listing Information">
+                              <field name="type_id"/>
+                              <field name="selling_price"/>
+                              <field name="availability_date"/>
+                              <field name="active"/>
+                          </group>
+          [...]
+      </record>
+
+      <record id="real_estate.property_search" model="ir.ui.view">
+          [...]
+              <search>
+                  [...]
+                  <filter name="group_by_state" context="{'group_by': 'state'}"/>
+                  <filter name="group_by_type" context="{'group_by': 'type_id'}"/>
+              </search>
+          </field>
+      </record>
+
+   .. code-block:: xml
+      :caption: `real_estate_property_data.xml`
+      :emphasize-lines: 3,9,15
+
+      <record id="real_estate.country_house" model="real.estate.property">
+          [...]
+          <field name="type_id" ref="real_estate.type_house"/>
+          [...]
+      </record>
+
+      <record id="real_estate.loft" model="real.estate.property">
+          [...]
+          <field name="type_id" ref="real_estate.type_apartment"/>
+          [...]
+      </record>
+
+      <record id="real_estate.mixed_use_commercial" model="real.estate.property">
+          [...]
+          <field name="type_id" ref="real_estate.type_retail"/>
+          [...]
+      </record>
 
 .. exercise::
 
